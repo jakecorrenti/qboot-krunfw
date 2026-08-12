@@ -32,7 +32,7 @@ static void accept_page(uint64_t page)
 int __attribute__ ((section (".text.startup"))) main(uint64_t cpuid)
 {
 	struct boot_params *bp = (struct boot_params *) 0x7000;
-	uint64_t entry = 0x1000000;
+	uint64_t entry = 0x1000123;
 	int i;
 
 	if (cpuid == 0) {
