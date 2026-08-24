@@ -1,4 +1,5 @@
 #include <asm/bootparam.h>
+#include <asm/e820.h>
 #include "string.h"
 #include "mptable.h"
 #include "ioport.h"
@@ -24,7 +25,7 @@ static void accept_page(uint64_t page)
 	memset(&args, 0, sizeof(struct tdcall_args));
 
 	args.rax = 6; // TDCALL_TDACCEPTPAGE
-	args.rcx = page * 4096;
+	args.rcx = page;
 
 	asm_td_call(&args);
 }
@@ -32,13 +33,23 @@ static void accept_page(uint64_t page)
 int __attribute__ ((section (".text.startup"))) main(uint64_t cpuid)
 {
 	struct boot_params *bp = (struct boot_params *) 0x7000;
-	uint64_t entry = 0x1000000;
+	uint64_t entry = 0x1000123;
 	int i;
 
 	if (cpuid == 0) {
-		for (i = 0; i < bp->hdr.syssize; i++) {
-			accept_page(i);
-		}
+        for (i = 0; i < bp->e820_entries; i++) {
+            struct boot_e820_entry entry = bp->e820_table[i];
+
+            if (entry.type != E820_RAM) {
+                continue;
+            }
+
+            uint64_t addr = entry.addr;
+            while (addr < entry.addr + entry.size) {
+                accept_page(addr);
+                addr += 4096;
+            }
+        }
 
 		setup_mptable(bp->hdr.root_flags);
 	} else {
