@@ -6,7 +6,7 @@ ENTRY(pm_entry)
 	xor %edx, %edx
         mov $0x8c00, %sp
 
-	// Detect BSPs
+	// Detect BSPs (VMM passes vCPU/APIC id in ESI)
 	test %esi, %esi
 	jnz park_ap
 
@@ -33,7 +33,7 @@ ENTRY(pm_entry)
 	mov %eax, (0xa010)
 	mov %edx, (0xa014)
 
-	// Point to PDE_START in PDTTE_START 2-3GB
+	// Point to PDE_START in PDTTE_START 3-4GB
 	mov $0xe003, %eax
 	mov %eax, (0xa018)
 	mov %edx, (0xa01c)
@@ -49,16 +49,19 @@ l3:
 	add $0x83, %eax
 	mov %eax, (%ebx,%edi,8)
 
-	// High PTE (set SEV C-bit)
+	// High PTE
 	mov %edx, 4(%ebx,%edi,8)
 
 	inc %edi
 	loop l3
 	jmp switch_to_64
 
+/*
+ * APs wait here until the BSP has accepted memory, initialized the
+ * MADT wakeup mailbox, and set ap_ready_flag in the firmware image.
+ */
 park_ap:
-	mov (0x71e0), %eax
-	cmp %esi, %eax
+	cmpl $1, ap_ready_flag
 	jne park_ap
 
 switch_to_64:
@@ -93,16 +96,50 @@ switch_to_64:
 3:
 	.code64
 	/*
-	 * Jump into C code (main)
+	 * BSP jumps into C (main). APs enter the MADT mailbox wait loop
+	 * and never return — the OS wakes them via the mailbox.
 	 */
-
 	cli
 	mov %rsi, %rax
 	and $0xff, %rax
+	test %rax, %rax
+	jnz ap_mailbox_wait
+
 	mov %rax, %rdi
 	mov $0x00000000ffff0000, %rax
 	jmp *%rax
 	hlt
+
+/*
+ * ACPI Multiprocessor Wakeup mailbox wait loop (long mode).
+ *
+ * RSI holds the AP's APIC ID from the VMM. Spin until the OS writes a
+ * Wakeup command targeting this APIC ID (or broadcast), then jump to
+ * the wakeup vector with interrupts disabled and identity paging.
+ */
+ap_mailbox_wait:
+	mov $0x5000, %rbx			/* MP_WAKEUP_MAILBOX_ADDR */
+	mov %esi, %r8d				/* my APIC ID */
+
+1:
+	pause
+	/* Ignore commands not addressed to us */
+	cmpl $0xfffffffe, 4(%rbx)		/* BROADCAST */
+	je 2f
+	cmpl %r8d, 4(%rbx)
+	jne 1b
+
+2:
+	movzwl (%rbx), %eax			/* command */
+	test %eax, %eax				/* NOOP */
+	jz 1b
+	cmpl $1, %eax				/* WAKEUP */
+	jne 1b
+
+	mov 8(%rbx), %rax			/* wakeup_vector */
+	/* Ack: clear command (+ reserved/apic_id low half) */
+	movq $0, (%rbx)
+	jmp *%rax
 
 gdt32:
 	.quad 0
