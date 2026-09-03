@@ -28,6 +28,7 @@ elf = executable(
     'main.c',
     'mptable.c',
     'madt.c',
+    'tdx_io.c',
   ),
   c_args: c_args,
   include_directories: include_directories('include'),

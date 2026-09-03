@@ -105,6 +105,22 @@ switch_to_64:
 	test %rax, %rax
 	jnz ap_mailbox_wait
 
+	/*
+	 * POST 0x04 via TDG.VP.VMCALL Instruction.IO. Raw OUT #VEs on TDX
+	 * (no handler → shutdown). RCX must expose R10-R15 to the VMM.
+	 * Required warm-up — not optional debug.
+	 */
+	push %rax
+	xor %eax, %eax				/* TDG.VP.VMCALL */
+	movl $0xfc00, %ecx			/* TDVMCALL_EXPOSE_REGS_MASK */
+	xor %r10, %r10				/* standard */
+	movq $0x1e, %r11			/* EXIT_REASON_IO_INSTRUCTION */
+	movq $1, %r12				/* size */
+	movq $1, %r13				/* write */
+	movq $0x80, %r14			/* POST port */
+	movq $0x04, %r15			/* POST_JMP_MAIN */
+	.byte 0x66, 0x0f, 0x01, 0xcc		/* tdcall */
+	pop %rax
 	mov %rax, %rdi
 	mov $0x00000000ffff0000, %rax
 	jmp *%rax
